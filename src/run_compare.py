@@ -1,6 +1,7 @@
 """Run batch 1 and batch 2 through all three strategies, then compare the results."""
 import argparse
 import uuid
+import time
 from pathlib import Path
 
 from src import pipeline
@@ -34,12 +35,13 @@ def main():
 
     for batch in BATCHES:
         run_id = uuid.uuid4().hex[:8]
+        t0 = time.perf_counter()
         stats = pipeline.ingest_file(con, data / batch, customer_ids, run_id)
+        ingest_seconds = time.perf_counter() - t0
         print(f"{batch}: in={stats['rows_in']} rejected={stats['rows_rejected']} "
-              f"duplicates_dropped={stats['duplicates_dropped']}")
+              f"duplicates_dropped={stats['duplicates_dropped']} ingest_seconds={ingest_seconds:.2f}")
         for name in pipeline.TARGETS:
             pipeline.run_strategy(con, name, stats, run_id)
-
     print("\nRun log:")
     for row in con.execute(
             "SELECT strategy, source_file, status, ROUND(seconds, 4), rows_in_target "

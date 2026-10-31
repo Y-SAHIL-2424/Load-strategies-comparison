@@ -2,11 +2,13 @@
 import csv
 import time
 from datetime import datetime
+import pandas as pd
 from pathlib import Path
 
 import duckdb
 
 from src.validate import validate_rows, check_schema
+from tests.test_pipeline import con
 
 COLS = "order_id, customer_id, order_date, amount, status, updated_at"
 TARGETS = {
@@ -72,17 +74,25 @@ def ingest_file(con, orders_path, customer_ids, run_id):
         con.execute("DELETE FROM source_orders WHERE source_file = ?", [source_file])
         con.execute("DELETE FROM rejects WHERE source_file = ?", [source_file])
         if good:
-            con.executemany(
-                "INSERT INTO source_orders VALUES "
-                "(?, ?, CAST(? AS DATE), CAST(? AS DECIMAL(10,2)), ?, CAST(? AS TIMESTAMP), ?, ?)",
-                [(r["order_id"], r["customer_id"], r["order_date"], r["amount"],
-                  r["status"], r["updated_at"], run_id, source_file) for r in good])
+            con.register("good_df", pd.DataFrame([
+                (r["order_id"], r["customer_id"], r["order_date"], r["amount"],
+                 r["status"], r["updated_at"], run_id, source_file) for r in good],
+                columns=["order_id", "customer_id", "order_date", "amount",
+                         "status", "updated_at", "run_id", "source_file"]))
+            con.execute("""
+                INSERT INTO source_orders
+                SELECT order_id, customer_id, CAST(order_date AS DATE),
+                       CAST(amount AS DECIMAL(10,2)), status,
+                       CAST(updated_at AS TIMESTAMP), run_id, source_file
+                FROM good_df""")
         if rejected:
-            con.executemany(
-                "INSERT INTO rejects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(r.get("order_id"), r.get("customer_id"), r.get("order_date"),
-                  r.get("amount"), r.get("status"), r.get("updated_at"),
-                  r["reject_reason"], run_id, source_file) for r in rejected])
+            con.register("rej_df", pd.DataFrame([
+                (r.get("order_id"), r.get("customer_id"), r.get("order_date"),
+                 r.get("amount"), r.get("status"), r.get("updated_at"),
+                 r["reject_reason"], run_id, source_file) for r in rejected],
+                columns=["order_id", "customer_id", "order_date", "amount", "status",
+                         "updated_at", "reject_reason", "run_id", "source_file"]))
+            con.execute("INSERT INTO rejects SELECT * FROM rej_df")
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
