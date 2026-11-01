@@ -2,3 +2,5 @@
 __pycache__/
 *.duckdb
 data/large/
+data/narrow_batch.csv
+.pytest_cache/
