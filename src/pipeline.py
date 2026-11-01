@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 from src.validate import validate_rows, check_schema
-from tests.test_pipeline import con
+
 
 COLS = "order_id, customer_id, order_date, amount, status, updated_at"
 TARGETS = {

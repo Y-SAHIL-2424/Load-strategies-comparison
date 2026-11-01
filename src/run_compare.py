@@ -3,6 +3,7 @@ import argparse
 import uuid
 import time
 from pathlib import Path
+from src.reconcile import reconcile, print_report
 
 from src import pipeline
 
@@ -11,6 +12,10 @@ BATCHES = ["orders_batch_1.csv", "orders_batch_2.csv"]
 
 def same_data(con, table_a, table_b):
     cols = pipeline.COLS
+    count_a = con.execute(f"SELECT COUNT(*) FROM {table_a}").fetchone()[0]
+    count_b = con.execute(f"SELECT COUNT(*) FROM {table_b}").fetchone()[0]
+    if count_a != count_b:
+        return False
     a_minus_b = con.execute(
         f"SELECT COUNT(*) FROM (SELECT {cols} FROM {table_a} EXCEPT SELECT {cols} FROM {table_b})").fetchone()[0]
     b_minus_a = con.execute(
@@ -33,6 +38,7 @@ def main():
     pipeline.init_schema(con)
     customer_ids = pipeline.load_customer_ids(data / "customers.csv")
 
+    rows_in_per_file = {}
     for batch in BATCHES:
         run_id = uuid.uuid4().hex[:8]
         t0 = time.perf_counter()
@@ -40,8 +46,10 @@ def main():
         ingest_seconds = time.perf_counter() - t0
         print(f"{batch}: in={stats['rows_in']} rejected={stats['rows_rejected']} "
               f"duplicates_dropped={stats['duplicates_dropped']} ingest_seconds={ingest_seconds:.2f}")
+        rows_in_per_file[stats["source_file"]] = stats["rows_in"]
         for name in pipeline.TARGETS:
             pipeline.run_strategy(con, name, stats, run_id)
+
     print("\nRun log:")
     for row in con.execute(
             "SELECT strategy, source_file, status, ROUND(seconds, 4), rows_in_target "
@@ -51,6 +59,9 @@ def main():
     print("\nComparison:")
     print("full vs merge     :", "MATCH" if same_data(con, "orders_full", "orders_merge") else "DIFFERENT")
     print("full vs partition :", "MATCH" if same_data(con, "orders_full", "orders_partition") else "DIFFERENT")
+
+    ok = print_report(reconcile(con, rows_in_per_file))
+    print("\nOVERALL:", "ALL CHECKS PASSED" if ok else "SOME CHECKS FAILED")
     con.close()
 
 
